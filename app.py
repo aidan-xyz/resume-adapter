@@ -461,23 +461,31 @@ def create_resume_pdf(adapted_resume_text, output_path):
         
         # Compile with pdflatex
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ['pdflatex', '-interaction=nonstopmode', '-output-directory', tmpdir, tex_path],
-                check=True,
                 capture_output=True,
-                timeout=30
+                timeout=60,
+                text=True
             )
             
-            # Copy PDF to output path
+            # Check if PDF was created
             pdf_path = os.path.join(tmpdir, 'resume.pdf')
+            if not os.path.exists(pdf_path):
+                # Save debug files
+                debug_tex = output_path.replace('.pdf', '.tex')
+                debug_log = output_path.replace('.pdf', '.log')
+                with open(debug_tex, 'w', encoding='utf-8') as f:
+                    f.write(latex_content)
+                log_path = os.path.join(tmpdir, 'resume.log')
+                if os.path.exists(log_path):
+                    shutil.copy(log_path, debug_log)
+                raise Exception(f"LaTeX failed to generate PDF. Check {debug_tex} and {debug_log}. Output: {result.stderr[:500]}")
+            
+            # Copy PDF to output path
             shutil.copy(pdf_path, output_path)
             
-        except subprocess.CalledProcessError as e:
-            # Fallback: save the .tex file for debugging
-            debug_path = output_path.replace('.pdf', '.tex')
-            with open(debug_path, 'w', encoding='utf-8') as f:
-                f.write(latex_content)
-            raise Exception(f"LaTeX compilation failed. Debug .tex saved to {debug_path}")
+        except subprocess.TimeoutExpired:
+            raise Exception("LaTeX compilation timed out after 60 seconds")
         except FileNotFoundError:
             raise Exception("pdflatex not found. Please install LaTeX (texlive-full on Linux, MacTeX on Mac, MiKTeX on Windows)")
     
@@ -507,21 +515,24 @@ def create_cover_letter_pdf(cover_letter_text, output_path):
             f.write(latex_content)
         
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ['pdflatex', '-interaction=nonstopmode', '-output-directory', tmpdir, tex_path],
-                check=True,
                 capture_output=True,
-                timeout=30
+                timeout=60,
+                text=True
             )
             
             pdf_path = os.path.join(tmpdir, 'cover_letter.pdf')
+            if not os.path.exists(pdf_path):
+                debug_path = output_path.replace('.pdf', '.tex')
+                with open(debug_path, 'w', encoding='utf-8') as f:
+                    f.write(latex_content)
+                raise Exception(f"Cover letter LaTeX failed. Check {debug_path}. Error: {result.stderr[:500]}")
+            
             shutil.copy(pdf_path, output_path)
             
-        except subprocess.CalledProcessError:
-            debug_path = output_path.replace('.pdf', '.tex')
-            with open(debug_path, 'w', encoding='utf-8') as f:
-                f.write(latex_content)
-            raise Exception(f"LaTeX compilation failed. Debug .tex saved to {debug_path}")
+        except subprocess.TimeoutExpired:
+            raise Exception("Cover letter compilation timed out after 60 seconds")
         except FileNotFoundError:
             raise Exception("pdflatex not found. Please install LaTeX")
     

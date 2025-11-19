@@ -1,8 +1,8 @@
 [phases.setup]
-nixPkgs = ["texlive.combined.scheme-basic"]
+nixPkgs = ["texlive.combined.scheme-basic", "ghostscript"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt"]
 
 [start]
-cmd = "gunicorn app:app"
+cmd = "gunicorn --config gunicorn.conf.py app:app"
