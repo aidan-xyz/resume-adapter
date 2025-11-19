@@ -493,6 +493,11 @@ def create_resume_pdf(adapted_resume_text, output_path):
 
 def create_cover_letter_pdf(cover_letter_text, output_path):
     """Generate PDF from cover letter text using LaTeX"""
+    # Handle newlines - double newline = paragraph break
+    cover_letter_escaped = escape_latex(cover_letter_text)
+    cover_letter_escaped = cover_letter_escaped.replace('\n\n', '\n\n\\vspace{0.5em}\n\n')
+    cover_letter_escaped = cover_letter_escaped.replace('\n', '\n\n')  # Single newlines become paragraph breaks
+    
     latex_content = r'''\documentclass[letterpaper,11pt]{article}
 
 \usepackage{latexsym}
@@ -504,7 +509,7 @@ def create_cover_letter_pdf(cover_letter_text, output_path):
 
 \begin{document}
 
-''' + escape_latex(cover_letter_text) + r'''
+''' + cover_letter_escaped + r'''
 
 \end{document}'''
     
@@ -542,6 +547,30 @@ def create_cover_letter_pdf(cover_letter_text, output_path):
 @auth.login_required
 def index():
     return render_template('index.html')
+
+@app.route('/health')
+def health():
+    """Health check endpoint that verifies LaTeX installation"""
+    status = {
+        'status': 'ok',
+        'latex_installed': False,
+        'latex_version': None
+    }
+    
+    try:
+        result = subprocess.run(
+            ['pdflatex', '--version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            status['latex_installed'] = True
+            status['latex_version'] = result.stdout.split('\n')[0]
+    except Exception as e:
+        status['latex_error'] = str(e)
+    
+    return jsonify(status)
 
 @app.route('/process', methods=['POST'])
 @auth.login_required
@@ -618,6 +647,9 @@ def process_resume():
         })
     
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        app.logger.error(f"Error processing resume: {str(e)}\n{error_details}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/download/resume/<filename>')
