@@ -1,6 +1,7 @@
 Flask==3.0.0
 anthropic==0.73.0
 pypdf==5.1.0
+reportlab==4.2.5
 Werkzeug==3.0.1
 Flask-HTTPAuth==4.8.0
 gunicorn==21.2.0

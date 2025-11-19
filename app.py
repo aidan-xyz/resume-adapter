@@ -5,11 +5,14 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 import anthropic
 import pypdf
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
+from reportlab.lib import colors
 import io
 import secrets
-import subprocess
-import tempfile
-import shutil
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -198,37 +201,94 @@ Be concise and professional. Keep answers to 2-3 sentences max unless more detai
     
     return message.content[0].text
 
-def escape_latex(text):
-    """Escape special LaTeX characters"""
-    replacements = {
-        '&': r'\&',
-        '%': r'\%',
-        '$': r'\$',
-        '#': r'\#',
-        '_': r'\_',
-        '{': r'\{',
-        '}': r'\}',
-        '~': r'\textasciitilde{}',
-        '^': r'\^{}',
-        '\\': r'\textbackslash{}',
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-    return text
-
 def create_resume_pdf(adapted_resume_text, output_path):
-    """Generate ATS-friendly PDF using LaTeX"""
-    # Parse the adapted resume text
+    """Generate ATS-friendly PDF using ReportLab matching LaTeX template style"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=0.5*inch,
+        leftMargin=0.5*inch,
+        topMargin=0.5*inch,
+        bottomMargin=0.5*inch
+    )
+    
+    styles = getSampleStyleSheet()
+    
+    # Custom styles matching LaTeX template exactly
+    name_style = ParagraphStyle(
+        'Name',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.black,
+        spaceAfter=2,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold',
+        leading=28
+    )
+    
+    contact_style = ParagraphStyle(
+        'Contact',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.black,
+        spaceAfter=12,
+        alignment=TA_CENTER,
+        fontName='Helvetica'
+    )
+    
+    section_heading_style = ParagraphStyle(
+        'SectionHeading',
+        parent=styles['Heading2'],
+        fontSize=11,
+        textColor=colors.black,
+        spaceAfter=4,
+        spaceBefore=8,
+        alignment=TA_LEFT,
+        fontName='Helvetica-Bold',
+        textTransform='uppercase'
+    )
+    
+    # Job title style (bold, left-right justified with dates)
+    job_title_style = ParagraphStyle(
+        'JobTitle',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.black,
+        spaceAfter=1,
+        alignment=TA_LEFT,
+        fontName='Helvetica-Bold'
+    )
+    
+    # Company/institution style (italic)
+    company_style = ParagraphStyle(
+        'Company',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.black,
+        spaceAfter=4,
+        alignment=TA_LEFT,
+        fontName='Helvetica-Oblique'
+    )
+    
+    bullet_style = ParagraphStyle(
+        'Bullet',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.black,
+        spaceAfter=2,
+        alignment=TA_LEFT,
+        fontName='Helvetica',
+        leftIndent=0,
+        bulletIndent=6
+    )
+    
+    # Parse resume
     lines = adapted_resume_text.strip().split('\n')
     
-    # Extract sections
     name = ""
     contact = ""
-    education_items = []
-    experience_items = []
-    projects_items = []
-    skills_text = ""
-    
+    sections = {'education': [], 'experience': [], 'projects': [], 'skills': []}
     current_section = None
     current_item = []
     
@@ -242,30 +302,29 @@ def create_resume_pdf(adapted_resume_text, output_path):
             continue
         elif line.startswith('EDUCATION:'):
             if current_item and current_section == 'contact':
-                contact = ' $|$ '.join(current_item)
+                contact = ' | '.join(current_item)
                 current_item = []
             current_section = 'education'
             continue
         elif line.startswith('EXPERIENCE:'):
-            if current_item and current_section == 'education':
-                education_items.append('\n'.join(current_item))
+            if current_item:
+                sections[current_section].append('\n'.join(current_item))
                 current_item = []
             current_section = 'experience'
             continue
         elif line.startswith('PROJECTS:'):
-            if current_item and current_section == 'experience':
-                experience_items.append('\n'.join(current_item))
+            if current_item:
+                sections[current_section].append('\n'.join(current_item))
                 current_item = []
             current_section = 'projects'
             continue
         elif line.startswith('TECHNICAL SKILLS:'):
-            if current_item and current_section == 'projects':
-                projects_items.append('\n'.join(current_item))
+            if current_item:
+                sections[current_section].append('\n'.join(current_item))
                 current_item = []
             current_section = 'skills'
             continue
         
-        # Add content to current section
         if current_section == 'contact':
             if not name:
                 name = line
@@ -275,288 +334,192 @@ def create_resume_pdf(adapted_resume_text, output_path):
             current_item.append(line)
     
     # Handle last section
-    if current_section == 'skills' and current_item:
-        skills_text = '\n'.join(current_item)
-    elif current_section == 'projects' and current_item:
-        projects_items.append('\n'.join(current_item))
+    if current_item and current_section:
+        sections[current_section].append('\n'.join(current_item))
     
-    # Build LaTeX document
-    latex_content = r'''\documentclass[letterpaper,11pt]{article}
-
-\usepackage{latexsym}
-\usepackage[empty]{fullpage}
-\usepackage{titlesec}
-\usepackage{marvosym}
-\usepackage[usenames,dvipsnames]{color}
-\usepackage{verbatim}
-\usepackage{enumitem}
-\usepackage[hidelinks]{hyperref}
-\usepackage{fancyhdr}
-\usepackage[english]{babel}
-\usepackage{tabularx}
-
-\pagestyle{fancy}
-\fancyhf{}
-\fancyfoot{}
-\renewcommand{\headrulewidth}{0pt}
-\renewcommand{\footrulewidth}{0pt}
-
-\addtolength{\oddsidemargin}{-0.5in}
-\addtolength{\evensidemargin}{-0.5in}
-\addtolength{\textwidth}{1in}
-\addtolength{\topmargin}{-.5in}
-\addtolength{\textheight}{1.0in}
-
-\urlstyle{same}
-\raggedbottom
-\raggedright
-\setlength{\tabcolsep}{0in}
-
-\titleformat{\section}{
-  \vspace{-4pt}\scshape\raggedright\large
-}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
-
-\newcommand{\resumeItem}[1]{
-  \item\small{
-    {#1 \vspace{-2pt}}
-  }
-}
-
-\newcommand{\resumeSubheading}[4]{
-  \vspace{-2pt}\item
-    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
-      \textbf{#1} & #2 \\
-      \textit{\small#3} & \textit{\small #4} \\
-    \end{tabular*}\vspace{-7pt}
-}
-
-\newcommand{\resumeProjectHeading}[2]{
-    \item
-    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
-      \small#1 & #2 \\
-    \end{tabular*}\vspace{-7pt}
-}
-
-\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
-
-\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
-\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
-\newcommand{\resumeItemListStart}{\begin{itemize}}
-\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
-
-\begin{document}
-
-\begin{center}
-    \textbf{\Huge \scshape ''' + escape_latex(name) + r'''} \\ \vspace{1pt}
-    \small ''' + escape_latex(contact) + r'''
-\end{center}
-
-'''
+    # Build document
+    story = []
     
-    # Add Education
-    if education_items:
-        latex_content += r'''\section{Education}
-  \resumeSubHeadingListStart
-'''
-        for item in education_items:
-            # Parse education item
+    # Header - Name and Contact
+    story.append(Paragraph(name, name_style))
+    story.append(Paragraph(contact, contact_style))
+    
+    # Education Section
+    if sections['education']:
+        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph('EDUCATION', section_heading_style))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=4))
+        
+        for item in sections['education']:
             item_lines = [l.strip() for l in item.split('\n') if l.strip()]
             if len(item_lines) >= 2:
-                school_loc = item_lines[0].split(' - ')
-                school = school_loc[0].strip() if school_loc else item_lines[0]
-                location = school_loc[1].strip() if len(school_loc) > 1 else ""
-                degree_dates = item_lines[1].split(' - ')
-                degree = degree_dates[0].strip() if degree_dates else item_lines[1]
-                dates = ' - '.join([d.strip() for d in degree_dates[1:]]) if len(degree_dates) > 1 else ""
+                # Line 1: School - Location
+                # Line 2: Degree - Dates
+                school_location = item_lines[0]
+                degree_dates = item_lines[1]
                 
-                latex_content += f'''    \\resumeSubheading
-      {{{escape_latex(school)}}}{{{escape_latex(location)}}}
-      {{{escape_latex(degree)}}}{{{escape_latex(dates)}}}
-'''
-        latex_content += r'''  \resumeSubHeadingListEnd
-
-'''
+                # Create table for left-right alignment
+                parts1 = school_location.split(' - ')
+                parts2 = degree_dates.split(' - ')
+                
+                school = parts1[0] if parts1 else ""
+                location = parts1[1] if len(parts1) > 1 else ""
+                degree = parts2[0] if parts2 else ""
+                dates = ' - '.join(parts2[1:]) if len(parts2) > 1 else ""
+                
+                # School and Location row
+                data = [[Paragraph(f'<b>{school}</b>', bullet_style), Paragraph(location, bullet_style)]]
+                t = Table(data, colWidths=[5*inch, 2*inch])
+                t.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+                    ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                story.append(t)
+                
+                # Degree and Dates row
+                data = [[Paragraph(f'<i>{degree}</i>', bullet_style), Paragraph(f'<i>{dates}</i>', bullet_style)]]
+                t = Table(data, colWidths=[5*inch, 2*inch])
+                t.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+                    ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                story.append(t)
+                story.append(Spacer(1, 0.05*inch))
     
-    # Add Experience
-    if experience_items:
-        latex_content += r'''\section{Experience}
-  \resumeSubHeadingListStart
-'''
-        for item in experience_items:
+    # Experience Section
+    if sections['experience']:
+        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph('EXPERIENCE', section_heading_style))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=4))
+        
+        for item in sections['experience']:
             item_lines = [l.strip() for l in item.split('\n') if l.strip()]
             if len(item_lines) >= 2:
-                # First line: job title - dates
-                title_dates = item_lines[0].split(' - ')
-                title = title_dates[0].strip() if title_dates else item_lines[0]
-                dates = ' - '.join([d.strip() for d in title_dates[1:]]) if len(title_dates) > 1 else ""
+                # Line 1: Job Title - Dates
+                # Line 2: Company - Location
+                title_dates = item_lines[0]
+                company_location = item_lines[1]
                 
-                # Second line: company - location
-                company_loc = item_lines[1].split(' - ')
-                company = company_loc[0].strip() if company_loc else item_lines[1]
-                location = company_loc[1].strip() if len(company_loc) > 1 else ""
+                parts1 = title_dates.split(' - ')
+                title = parts1[0] if parts1 else ""
+                dates = ' - '.join(parts1[1:]) if len(parts1) > 1 else ""
                 
-                latex_content += f'''    \\resumeSubheading
-      {{{escape_latex(title)}}}{{{escape_latex(dates)}}}
-      {{{escape_latex(company)}}}{{{escape_latex(location)}}}
-      \\resumeItemListStart
-'''
-                # Add bullet points
+                parts2 = company_location.split(' - ')
+                company = parts2[0] if parts2 else ""
+                location = parts2[1] if len(parts2) > 1 else ""
+                
+                # Title and Dates row
+                data = [[Paragraph(f'<b>{title}</b>', job_title_style), Paragraph(f'<b>{dates}</b>', job_title_style)]]
+                t = Table(data, colWidths=[5*inch, 2*inch])
+                t.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+                    ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                story.append(t)
+                
+                # Company and Location row
+                data = [[Paragraph(f'<i>{company}</i>', company_style), Paragraph(f'<i>{location}</i>', company_style)]]
+                t = Table(data, colWidths=[5*inch, 2*inch])
+                t.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+                    ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                story.append(t)
+                
+                # Bullet points
                 for line in item_lines[2:]:
                     if line.startswith('•') or line.startswith('*'):
                         bullet_text = line[1:].strip()
-                        latex_content += f'''        \\resumeItem{{{escape_latex(bullet_text)}}}
-'''
-                latex_content += r'''      \resumeItemListEnd
-'''
-        latex_content += r'''  \resumeSubHeadingListEnd
-
-'''
+                        story.append(Paragraph(f'• {bullet_text}', bullet_style))
+                
+                story.append(Spacer(1, 0.08*inch))
     
-    # Add Projects
-    if projects_items:
-        latex_content += r'''\section{Projects}
-    \resumeSubHeadingListStart
-'''
-        for item in projects_items:
+    # Projects Section
+    if sections['projects']:
+        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph('PROJECTS', section_heading_style))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=4))
+        
+        for item in sections['projects']:
             item_lines = [l.strip() for l in item.split('\n') if l.strip()]
             if item_lines:
-                # First line: project name | tech - dates
-                first_line = item_lines[0]
-                latex_content += f'''      \\resumeProjectHeading
-          {{{escape_latex(first_line)}}}{{}}
-          \\resumeItemListStart
-'''
+                # First line is project title/tech
+                story.append(Paragraph(f'<b>{item_lines[0]}</b>', job_title_style))
+                
+                # Bullet points
                 for line in item_lines[1:]:
                     if line.startswith('•') or line.startswith('*'):
                         bullet_text = line[1:].strip()
-                        latex_content += f'''            \\resumeItem{{{escape_latex(bullet_text)}}}
-'''
-                latex_content += r'''          \resumeItemListEnd
-'''
-        latex_content += r'''    \resumeSubHeadingListEnd
-
-'''
-    
-    # Add Skills
-    if skills_text:
-        latex_content += r'''\section{Technical Skills}
- \begin{itemize}[leftmargin=0.15in, label={}]
-    \small{\item{
-'''
-        for line in skills_text.split('\n'):
-            line = line.strip()
-            if line:
-                latex_content += f'''     {escape_latex(line)} \\\\
-'''
-        latex_content += r'''    }}
- \end{itemize}
-'''
-    
-    latex_content += r'''\end{document}'''
-    
-    # Always save the .tex file for debugging
-    debug_tex = output_path.replace('.pdf', '.tex')
-    with open(debug_tex, 'w', encoding='utf-8') as f:
-        f.write(latex_content)
-    
-    # Compile LaTeX to PDF
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tex_path = os.path.join(tmpdir, 'resume.tex')
-        with open(tex_path, 'w', encoding='utf-8') as f:
-            f.write(latex_content)
-        
-        # Compile with pdflatex
-        try:
-            result = subprocess.run(
-                ['pdflatex', '-interaction=nonstopmode', '-output-directory', tmpdir, tex_path],
-                capture_output=True,
-                timeout=60,
-                text=True
-            )
-            
-            # Always save the log file
-            log_path = os.path.join(tmpdir, 'resume.log')
-            if os.path.exists(log_path):
-                debug_log = output_path.replace('.pdf', '.log')
-                shutil.copy(log_path, debug_log)
-                app.logger.info(f"LaTeX log saved to {debug_log}")
-            
-            # Check if PDF was created
-            pdf_path = os.path.join(tmpdir, 'resume.pdf')
-            if not os.path.exists(pdf_path):
-                # Extract error from log
-                error_msg = "Unknown LaTeX error"
-                if os.path.exists(log_path):
-                    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        log_content = f.read()
-                        # Find the first error line
-                        for line in log_content.split('\n'):
-                            if '!' in line and 'Error' in line:
-                                error_msg = line
-                                break
+                        story.append(Paragraph(f'• {bullet_text}', bullet_style))
                 
-                raise Exception(f"LaTeX compilation failed: {error_msg}. Check {debug_tex} and {output_path.replace('.pdf', '.log')}")
-            
-            # Copy PDF to output path
-            shutil.copy(pdf_path, output_path)
-            app.logger.info(f"Successfully created PDF: {output_path}")
-            
-        except subprocess.TimeoutExpired:
-            raise Exception("LaTeX compilation timed out after 60 seconds")
-        except FileNotFoundError:
-            raise Exception("pdflatex not found. Please install LaTeX (texlive-full on Linux, MacTeX on Mac, MiKTeX on Windows)")
+                story.append(Spacer(1, 0.08*inch))
+    
+    # Skills Section
+    if sections['skills']:
+        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph('TECHNICAL SKILLS', section_heading_style))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=4))
+        
+        for item in sections['skills']:
+            for line in item.split('\n'):
+                line = line.strip()
+                if line:
+                    story.append(Paragraph(line, bullet_style))
+    
+    # Build PDF
+    doc.build(story)
+    
+    # Write to file
+    pdf_data = buffer.getvalue()
+    buffer.close()
+    
+    with open(output_path, 'wb') as f:
+        f.write(pdf_data)
     
     return output_path
 
 def create_cover_letter_pdf(cover_letter_text, output_path):
-    """Generate PDF from cover letter text using LaTeX"""
-    # Handle newlines - double newline = paragraph break
-    cover_letter_escaped = escape_latex(cover_letter_text)
-    cover_letter_escaped = cover_letter_escaped.replace('\n\n', '\n\n\\vspace{0.5em}\n\n')
-    cover_letter_escaped = cover_letter_escaped.replace('\n', '\n\n')  # Single newlines become paragraph breaks
+    """Generate PDF from cover letter text using ReportLab"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=inch,
+        leftMargin=inch,
+        topMargin=inch,
+        bottomMargin=inch
+    )
     
-    latex_content = r'''\documentclass[letterpaper,11pt]{article}
-
-\usepackage{latexsym}
-\usepackage[empty]{fullpage}
-\usepackage[hidelinks]{hyperref}
-\usepackage[english]{babel}
-
-\usepackage[margin=1in]{geometry}
-
-\begin{document}
-
-''' + cover_letter_escaped + r'''
-
-\end{document}'''
+    styles = getSampleStyleSheet()
+    body_style = ParagraphStyle(
+        'Body',
+        parent=styles['Normal'],
+        fontSize=11,
+        textColor=colors.black,
+        spaceAfter=12,
+        alignment=TA_LEFT,
+        fontName='Helvetica'
+    )
     
-    # Compile LaTeX to PDF
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tex_path = os.path.join(tmpdir, 'cover_letter.tex')
-        with open(tex_path, 'w', encoding='utf-8') as f:
-            f.write(latex_content)
-        
-        try:
-            result = subprocess.run(
-                ['pdflatex', '-interaction=nonstopmode', '-output-directory', tmpdir, tex_path],
-                capture_output=True,
-                timeout=60,
-                text=True
-            )
-            
-            pdf_path = os.path.join(tmpdir, 'cover_letter.pdf')
-            if not os.path.exists(pdf_path):
-                debug_path = output_path.replace('.pdf', '.tex')
-                with open(debug_path, 'w', encoding='utf-8') as f:
-                    f.write(latex_content)
-                raise Exception(f"Cover letter LaTeX failed. Check {debug_path}. Error: {result.stderr[:500]}")
-            
-            shutil.copy(pdf_path, output_path)
-            
-        except subprocess.TimeoutExpired:
-            raise Exception("Cover letter compilation timed out after 60 seconds")
-        except FileNotFoundError:
-            raise Exception("pdflatex not found. Please install LaTeX")
+    story = []
+    paragraphs = cover_letter_text.strip().split('\n\n')
+    
+    for para in paragraphs:
+        if para.strip():
+            story.append(Paragraph(para.strip(), body_style))
+            story.append(Spacer(1, 0.1*inch))
+    
+    doc.build(story)
+    
+    pdf_data = buffer.getvalue()
+    buffer.close()
+    
+    with open(output_path, 'wb') as f:
+        f.write(pdf_data)
     
     return output_path
 
@@ -567,27 +530,8 @@ def index():
 
 @app.route('/health')
 def health():
-    """Health check endpoint that verifies LaTeX installation"""
-    status = {
-        'status': 'ok',
-        'latex_installed': False,
-        'latex_version': None
-    }
-    
-    try:
-        result = subprocess.run(
-            ['pdflatex', '--version'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            status['latex_installed'] = True
-            status['latex_version'] = result.stdout.split('\n')[0]
-    except Exception as e:
-        status['latex_error'] = str(e)
-    
-    return jsonify(status)
+    """Health check endpoint"""
+    return jsonify({'status': 'ok', 'pdf_library': 'ReportLab'})
 
 @app.route('/process', methods=['POST'])
 @auth.login_required
@@ -688,6 +632,15 @@ def clear_resume():
     session.pop('original_resume_text', None)
     session.pop('resume_filename', None)
     return jsonify({'success': True})
+
+@app.route('/debug/<filename>')
+@auth.login_required
+def download_debug(filename):
+    """Download debug .tex or .log files"""
+    file_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
+    if os.path.exists(file_path) and (filename.endswith('.tex') or filename.endswith('.log')):
+        return send_file(file_path, as_attachment=True, download_name=filename)
+    return jsonify({'error': 'File not found'}), 404
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
