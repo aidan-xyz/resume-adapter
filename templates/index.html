@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resume Adapter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-4xl mx-auto px-4 py-12">
+        <div class="mb-12">
+            <h1 class="text-3xl font-bold text-gray-900 mb-2">Resume Adapter</h1>
+            <p class="text-gray-600">Upload your resume and job description. Get an ATS-optimized resume and cover letter.</p>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-8 mb-8">
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Your Resume (PDF) <span id="optionalLabel" class="hidden text-gray-500">- Optional (using cached resume)</span>
+                    </label>
+                    <input 
+                        type="file" 
+                        id="resumeFile" 
+                        name="resume"
+                        accept=".pdf"
+                        class="block w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-md file:border-0
+                        file:text-sm file:font-medium
+                        file:bg-gray-900 file:text-white
+                        hover:file:bg-gray-800
+                        cursor-pointer"
+                    >
+                    <button 
+                        type="button"
+                        id="clearResumeBtn"
+                        class="hidden mt-2 text-sm text-red-600 hover:text-red-800"
+                        onclick="clearCachedResume()"
+                    >
+                        Clear cached resume and upload new one
+                    </button>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Job Description
+                    </label>
+                    <textarea 
+                        id="jobDescription" 
+                        name="job_description"
+                        rows="8"
+                        placeholder="Paste the full job description here..."
+                        class="w-full p-4 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-700 resize-none focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                        required
+                    ></textarea>
+                </div>
+
+                <div class="flex gap-4">
+                    <button 
+                        type="submit"
+                        id="processBtn"
+                        class="flex-1 bg-gray-900 text-white py-3 px-6 rounded-md font-medium hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    >
+                        Generate Resume & Cover Letter
+                    </button>
+                    <button 
+                        type="button"
+                        id="nextJobBtn"
+                        class="hidden flex-1 bg-blue-600 text-white py-3 px-6 rounded-md font-medium hover:bg-blue-700 transition-colors"
+                        onclick="nextJob()"
+                    >
+                        Next Job →
+                    </button>
+                </div>
+            </form>
+
+            <!-- Loading State -->
+            <div id="loading" class="hidden mt-6 text-center">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                <p class="mt-2 text-sm text-gray-600">Processing your resume... this may take 30 seconds</p>
+            </div>
+
+            <!-- Error State -->
+            <div id="error" class="hidden mt-6 p-4 bg-red-50 border border-red-200 rounded-md">
+                <p class="text-sm text-red-800"></p>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results" class="hidden space-y-6">
+            <!-- Download Buttons -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Download Your Documents</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <a 
+                        id="resumeDownloadBtn"
+                        href="#"
+                        class="block text-center bg-gray-900 text-white py-3 px-6 rounded-md font-medium hover:bg-gray-800 transition-colors"
+                    >
+                        Download Resume PDF
+                    </a>
+                    <a 
+                        id="coverLetterDownloadBtn"
+                        href="#"
+                        class="block text-center bg-gray-900 text-white py-3 px-6 rounded-md font-medium hover:bg-gray-800 transition-colors"
+                    >
+                        Download Cover Letter PDF
+                    </a>
+                </div>
+            </div>
+
+            <!-- Adapted Resume -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900">Adapted Resume</h2>
+                    <button onclick="copyToClipboard('adaptedResume')" class="text-sm text-gray-600 hover:text-gray-900">
+                        Copy
+                    </button>
+                </div>
+                <textarea 
+                    id="adaptedResume" 
+                    readonly 
+                    class="w-full h-96 p-4 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-700 font-mono resize-none"
+                ></textarea>
+            </div>
+
+            <!-- Cover Letter -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900">Cover Letter</h2>
+                    <button onclick="copyToClipboard('coverLetter')" class="text-sm text-gray-600 hover:text-gray-900">
+                        Copy
+                    </button>
+                </div>
+                <textarea 
+                    id="coverLetter" 
+                    readonly 
+                    class="w-full h-64 p-4 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-700 resize-none"
+                ></textarea>
+            </div>
+
+            <!-- Form Text -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-semibold text-gray-900">Form Text (For Manual Entry)</h2>
+                    <button onclick="copyToClipboard('formText')" class="text-sm text-gray-600 hover:text-gray-900">
+                        Copy
+                    </button>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Copy-paste this into those annoying job forms that make you re-enter everything.</p>
+                <textarea 
+                    id="formText" 
+                    readonly 
+                    class="w-full h-96 p-4 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-700 font-mono resize-none"
+                ></textarea>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('uploadForm');
+        const loading = document.getElementById('loading');
+        const error = document.getElementById('error');
+        const results = document.getElementById('results');
+        const processBtn = document.getElementById('processBtn');
+        const nextJobBtn = document.getElementById('nextJobBtn');
+        const resumeFile = document.getElementById('resumeFile');
+        const optionalLabel = document.getElementById('optionalLabel');
+        const clearResumeBtn = document.getElementById('clearResumeBtn');
+        
+        let hasResumeCached = false;
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(form);
+            const file = resumeFile.files[0];
+            const jobDesc = document.getElementById('jobDescription').value;
+            
+            // Only require file on first submission
+            if (!file && !hasResumeCached) {
+                showError('Please select a resume PDF');
+                return;
+            }
+
+            if (!jobDesc.trim()) {
+                showError('Please paste the job description');
+                return;
+            }
+
+            // Show loading, hide error and results
+            loading.classList.remove('hidden');
+            error.classList.add('hidden');
+            results.classList.add('hidden');
+            processBtn.disabled = true;
+
+            try {
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Something went wrong');
+                }
+
+                // Update cached resume state
+                if (data.has_resume_cached) {
+                    hasResumeCached = true;
+                    resumeFile.removeAttribute('required');
+                    optionalLabel.classList.remove('hidden');
+                    clearResumeBtn.classList.remove('hidden');
+                    nextJobBtn.classList.remove('hidden');
+                }
+
+                // Populate results
+                document.getElementById('adaptedResume').value = data.adapted_resume;
+                document.getElementById('coverLetter').value = data.cover_letter;
+                document.getElementById('formText').value = data.form_text;
+                
+                // Set download links
+                document.getElementById('resumeDownloadBtn').href = data.resume_pdf_url;
+                document.getElementById('coverLetterDownloadBtn').href = data.cover_letter_pdf_url;
+
+                // Show results
+                results.classList.remove('hidden');
+                loading.classList.add('hidden');
+
+            } catch (err) {
+                showError(err.message);
+                loading.classList.add('hidden');
+            } finally {
+                processBtn.disabled = false;
+            }
+        });
+
+        function nextJob() {
+            // Clear job description and results
+            document.getElementById('jobDescription').value = '';
+            results.classList.add('hidden');
+            error.classList.add('hidden');
+            
+            // Scroll to top
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            
+            // Focus on job description
+            document.getElementById('jobDescription').focus();
+        }
+
+        async function clearCachedResume() {
+            try {
+                await fetch('/clear_resume', { method: 'POST' });
+                
+                // Reset state
+                hasResumeCached = false;
+                resumeFile.setAttribute('required', 'required');
+                resumeFile.value = '';
+                optionalLabel.classList.add('hidden');
+                clearResumeBtn.classList.add('hidden');
+                nextJobBtn.classList.add('hidden');
+                results.classList.add('hidden');
+                
+            } catch (err) {
+                showError('Failed to clear cached resume');
+            }
+        }
+
+        function showError(message) {
+            error.querySelector('p').textContent = message;
+            error.classList.remove('hidden');
+        }
+
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            element.select();
+            document.execCommand('copy');
+            
+            // Visual feedback
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = 'Copied!';
+            setTimeout(() => {
+                button.textContent = originalText;
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
