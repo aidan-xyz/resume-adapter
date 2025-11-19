@@ -65,7 +65,7 @@ Here is the job description:
 {job_description}
 
 Please reformat this resume to be optimized for this job. Follow these rules:
-1. Keep the same basic structure (Education, Experience, Projects, Skills)
+1. Keep the same basic structure with sections in this EXACT order: Education, Experience, Projects, Skills
 2. Emphasize experience and skills relevant to the job description
 3. Use keywords from the job description where appropriate
 4. Keep bullet points concise and impact-focused
@@ -344,7 +344,7 @@ def create_resume_pdf(adapted_resume_text, output_path):
     story.append(Paragraph(name, name_style))
     story.append(Paragraph(contact, contact_style))
     
-    # Education Section
+    # Education Section (FIRST)
     if sections['education']:
         story.append(Spacer(1, 0.1*inch))
         story.append(Paragraph('EDUCATION', section_heading_style))
@@ -388,7 +388,7 @@ def create_resume_pdf(adapted_resume_text, output_path):
                 story.append(t)
                 story.append(Spacer(1, 0.05*inch))
     
-    # Experience Section
+    # Experience Section (SECOND)
     if sections['experience']:
         story.append(Spacer(1, 0.1*inch))
         story.append(Paragraph('EXPERIENCE', section_heading_style))
@@ -438,7 +438,7 @@ def create_resume_pdf(adapted_resume_text, output_path):
                 
                 story.append(Spacer(1, 0.08*inch))
     
-    # Projects Section
+    # Projects Section (THIRD)
     if sections['projects']:
         story.append(Spacer(1, 0.1*inch))
         story.append(Paragraph('PROJECTS', section_heading_style))
@@ -458,7 +458,7 @@ def create_resume_pdf(adapted_resume_text, output_path):
                 
                 story.append(Spacer(1, 0.08*inch))
     
-    # Skills Section
+    # Skills Section (FOURTH/LAST)
     if sections['skills']:
         story.append(Spacer(1, 0.1*inch))
         story.append(Paragraph('TECHNICAL SKILLS', section_heading_style))
