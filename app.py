@@ -536,6 +536,7 @@ def index():
 @auth.login_required
 def process_resume():
     job_description = request.form.get('job_description', '').strip()
+    form_questions = request.form.get('form_questions', '').strip()
     
     if not job_description:
         return jsonify({'error': 'Job description is required'}), 400
@@ -583,8 +584,11 @@ def process_resume():
         # Generate cover letter
         cover_letter = generate_cover_letter(resume_text, job_description)
         
-        # Generate form text for manual entry
-        form_text = generate_form_text(resume_text, job_description)
+        # Generate form text for manual entry (include form_questions if provided)
+        combined_questions = job_description
+        if form_questions:
+            combined_questions = f"{job_description}\n\nADDITIONAL APPLICATION QUESTIONS:\n{form_questions}"
+        form_text = generate_form_text(resume_text, combined_questions)
         
         # Create output PDFs
         resume_output_path = os.path.join(app.config['OUTPUT_FOLDER'], f"adapted_{filename}")
