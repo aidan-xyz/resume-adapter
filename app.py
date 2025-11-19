@@ -5,13 +5,11 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 import anthropic
 import pypdf
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.enums import TA_LEFT
 import io
 import secrets
+import subprocess
+import tempfile
+import shutil
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -150,51 +148,44 @@ Return ONLY the cover letter text, no explanations."""
     return message.content[0].text
 
 def generate_form_text(resume_text, job_description):
-    """Generate plaintext formatted for copy-pasting into job application forms"""
+    """Extract form questions from job posting and provide answers based on resume"""
     client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
     
-    prompt = f"""You are helping format resume content for those annoying job application forms that make you manually re-enter everything.
+    prompt = f"""You are helping fill out job application forms that ask specific questions.
 
-Here is the resume:
+Here is the candidate's resume:
 {resume_text}
 
-Here is the job description:
+Here is the job posting (may contain application questions):
 {job_description}
 
-Create a plaintext version optimized for copy-pasting into web forms. Format it like this:
+Your task:
+1. Extract any application questions from the job posting (like "Why do you want to work here?", "How many years of X experience?", "Are you authorized to work in...", etc.)
+2. For each question, provide a ready-to-paste answer based on the resume
+3. If no specific questions are found, provide common form fields instead
 
-WORK EXPERIENCE:
+Format your response EXACTLY like this:
 
-[Job Title] at [Company Name]
-[Start Date] - [End Date]
-• [Achievement/responsibility]
-• [Achievement/responsibility]
-• [Achievement/responsibility]
+=== APPLICATION FORM ANSWERS ===
 
-[Next Job Title] at [Company Name]
-[Start Date] - [End Date]
-• [Achievement/responsibility]
-• [Achievement/responsibility]
+QUESTION: [Extracted question or common field name]
+ANSWER: [Your response based on resume]
 
-EDUCATION:
+QUESTION: [Next question]
+ANSWER: [Your response]
 
-[Degree] in [Major]
-[University Name]
-[Graduation Date]
-GPA: [if mentioned]
+=== COMMON FIELDS ===
 
-SKILLS:
+Years of relevant experience: [X years]
+Highest education level: [Degree]
+Willing to relocate: [Yes/No based on resume]
+Authorized to work in US: [Yes - confirm with candidate]
+Expected salary: [Research market rate for this role]
+Available start date: [2 weeks notice / Immediate]
 
-[Comma-separated list of relevant technical skills from the job description]
+Key technical skills (comma-separated): [relevant skills from resume]
 
-PROJECTS (if applicable):
-
-[Project Name]
-[Brief description]
-Technologies: [list]
-
-Keep it concise and relevant to the job. Focus on what matters for this specific role.
-Return ONLY the formatted text, no explanations."""
+Be concise and professional. Keep answers to 2-3 sentences max unless more detail is needed."""
 
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
@@ -207,150 +198,332 @@ Return ONLY the formatted text, no explanations."""
     
     return message.content[0].text
 
+def escape_latex(text):
+    """Escape special LaTeX characters"""
+    replacements = {
+        '&': r'\&',
+        '%': r'\%',
+        '$': r'\$',
+        '#': r'\#',
+        '_': r'\_',
+        '{': r'\{',
+        '}': r'\}',
+        '~': r'\textasciitilde{}',
+        '^': r'\^{}',
+        '\\': r'\textbackslash{}',
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
 def create_resume_pdf(adapted_resume_text, output_path):
-    """Generate ATS-friendly PDF from adapted resume text"""
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=letter,
-        rightMargin=0.75*inch,
-        leftMargin=0.75*inch,
-        topMargin=0.5*inch,
-        bottomMargin=0.5*inch
-    )
-    
-    # Styles
-    styles = getSampleStyleSheet()
-    
-    # Custom styles for ATS-friendly resume
-    name_style = ParagraphStyle(
-        'Name',
-        parent=styles['Heading1'],
-        fontSize=18,
-        textColor='black',
-        spaceAfter=6,
-        alignment=TA_LEFT
-    )
-    
-    contact_style = ParagraphStyle(
-        'Contact',
-        parent=styles['Normal'],
-        fontSize=10,
-        textColor='black',
-        spaceAfter=12,
-        alignment=TA_LEFT
-    )
-    
-    heading_style = ParagraphStyle(
-        'SectionHeading',
-        parent=styles['Heading2'],
-        fontSize=12,
-        textColor='black',
-        spaceAfter=6,
-        spaceBefore=8,
-        alignment=TA_LEFT,
-        bold=True
-    )
-    
-    body_style = ParagraphStyle(
-        'Body',
-        parent=styles['Normal'],
-        fontSize=10,
-        textColor='black',
-        spaceAfter=4,
-        alignment=TA_LEFT
-    )
-    
+    """Generate ATS-friendly PDF using LaTeX"""
     # Parse the adapted resume text
-    story = []
     lines = adapted_resume_text.strip().split('\n')
     
+    # Extract sections
+    name = ""
+    contact = ""
+    education_items = []
+    experience_items = []
+    projects_items = []
+    skills_text = ""
+    
     current_section = None
+    current_item = []
+    
     for line in lines:
         line = line.strip()
         if not line:
             continue
             
-        # Check for section headers
         if line.startswith('CONTACT INFO:'):
             current_section = 'contact'
             continue
         elif line.startswith('EDUCATION:'):
-            story.append(Paragraph('EDUCATION', heading_style))
+            if current_item and current_section == 'contact':
+                contact = ' $|$ '.join(current_item)
+                current_item = []
             current_section = 'education'
             continue
         elif line.startswith('EXPERIENCE:'):
-            story.append(Paragraph('EXPERIENCE', heading_style))
+            if current_item and current_section == 'education':
+                education_items.append('\n'.join(current_item))
+                current_item = []
             current_section = 'experience'
             continue
         elif line.startswith('PROJECTS:'):
-            story.append(Paragraph('PROJECTS', heading_style))
+            if current_item and current_section == 'experience':
+                experience_items.append('\n'.join(current_item))
+                current_item = []
             current_section = 'projects'
             continue
         elif line.startswith('TECHNICAL SKILLS:'):
-            story.append(Paragraph('TECHNICAL SKILLS', heading_style))
+            if current_item and current_section == 'projects':
+                projects_items.append('\n'.join(current_item))
+                current_item = []
             current_section = 'skills'
             continue
         
-        # Handle content based on section
+        # Add content to current section
         if current_section == 'contact':
-            if not story:  # First line is the name
-                story.append(Paragraph(line, name_style))
+            if not name:
+                name = line
             else:
-                story.append(Paragraph(line, contact_style))
+                current_item.append(line)
         else:
-            # Regular content
-            story.append(Paragraph(line, body_style))
+            current_item.append(line)
     
-    # Build PDF
-    doc.build(story)
+    # Handle last section
+    if current_section == 'skills' and current_item:
+        skills_text = '\n'.join(current_item)
+    elif current_section == 'projects' and current_item:
+        projects_items.append('\n'.join(current_item))
     
-    # Write to file
-    pdf_data = buffer.getvalue()
-    buffer.close()
+    # Build LaTeX document
+    latex_content = r'''\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-2pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & #2 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+\begin{document}
+
+\begin{center}
+    \textbf{\Huge \scshape ''' + escape_latex(name) + r'''} \\ \vspace{1pt}
+    \small ''' + escape_latex(contact) + r'''
+\end{center}
+
+'''
     
-    with open(output_path, 'wb') as f:
-        f.write(pdf_data)
+    # Add Education
+    if education_items:
+        latex_content += r'''\section{Education}
+  \resumeSubHeadingListStart
+'''
+        for item in education_items:
+            # Parse education item
+            item_lines = item.split('\n')
+            if len(item_lines) >= 2:
+                school_loc = item_lines[0].split(' - ')
+                school = school_loc[0] if school_loc else item_lines[0]
+                location = school_loc[1] if len(school_loc) > 1 else ""
+                degree_dates = item_lines[1].split(' - ')
+                degree = degree_dates[0] if degree_dates else item_lines[1]
+                dates = degree_dates[1] if len(degree_dates) > 1 else ""
+                
+                latex_content += f'''    \\resumeSubheading
+      {{{escape_latex(school)}}}{{{escape_latex(location)}}}
+      {{{escape_latex(degree)}}}{{{escape_latex(dates)}}}
+'''
+        latex_content += r'''  \resumeSubHeadingListEnd
+
+'''
+    
+    # Add Experience
+    if experience_items:
+        latex_content += r'''\section{Experience}
+  \resumeSubHeadingListStart
+'''
+        for item in experience_items:
+            item_lines = [l for l in item.split('\n') if l.strip()]
+            if len(item_lines) >= 2:
+                # First line: job title - dates
+                title_dates = item_lines[0].split(' - ')
+                title = title_dates[0] if title_dates else item_lines[0]
+                dates = ' - '.join(title_dates[1:]) if len(title_dates) > 1 else ""
+                
+                # Second line: company - location
+                company_loc = item_lines[1].split(' - ')
+                company = company_loc[0] if company_loc else item_lines[1]
+                location = company_loc[1] if len(company_loc) > 1 else ""
+                
+                latex_content += f'''    \\resumeSubheading
+      {{{escape_latex(title)}}}{{{escape_latex(dates)}}}
+      {{{escape_latex(company)}}}{{{escape_latex(location)}}}
+      \\resumeItemListStart
+'''
+                # Add bullet points
+                for line in item_lines[2:]:
+                    if line.strip().startswith('•'):
+                        bullet_text = line.strip()[1:].strip()
+                        latex_content += f'''        \\resumeItem{{{escape_latex(bullet_text)}}}
+'''
+                latex_content += r'''      \resumeItemListEnd
+'''
+        latex_content += r'''  \resumeSubHeadingListEnd
+
+'''
+    
+    # Add Projects
+    if projects_items:
+        latex_content += r'''\section{Projects}
+    \resumeSubHeadingListStart
+'''
+        for item in projects_items:
+            item_lines = [l for l in item.split('\n') if l.strip()]
+            if item_lines:
+                # First line: project name | tech - dates
+                first_line = item_lines[0]
+                latex_content += f'''      \\resumeProjectHeading
+          {{{escape_latex(first_line)}}}{{}}
+          \\resumeItemListStart
+'''
+                for line in item_lines[1:]:
+                    if line.strip().startswith('•'):
+                        bullet_text = line.strip()[1:].strip()
+                        latex_content += f'''            \\resumeItem{{{escape_latex(bullet_text)}}}
+'''
+                latex_content += r'''          \resumeItemListEnd
+'''
+        latex_content += r'''    \resumeSubHeadingListEnd
+
+'''
+    
+    # Add Skills
+    if skills_text:
+        latex_content += r'''\section{Technical Skills}
+ \begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+'''
+        for line in skills_text.split('\n'):
+            if line.strip():
+                latex_content += f'''     {escape_latex(line)} \\\\
+'''
+        latex_content += r'''    }}
+ \end{itemize}
+'''
+    
+    latex_content += r'''\end{document}'''
+    
+    # Compile LaTeX to PDF
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tex_path = os.path.join(tmpdir, 'resume.tex')
+        with open(tex_path, 'w', encoding='utf-8') as f:
+            f.write(latex_content)
+        
+        # Compile with pdflatex
+        try:
+            subprocess.run(
+                ['pdflatex', '-interaction=nonstopmode', '-output-directory', tmpdir, tex_path],
+                check=True,
+                capture_output=True,
+                timeout=30
+            )
+            
+            # Copy PDF to output path
+            pdf_path = os.path.join(tmpdir, 'resume.pdf')
+            shutil.copy(pdf_path, output_path)
+            
+        except subprocess.CalledProcessError as e:
+            # Fallback: save the .tex file for debugging
+            debug_path = output_path.replace('.pdf', '.tex')
+            with open(debug_path, 'w', encoding='utf-8') as f:
+                f.write(latex_content)
+            raise Exception(f"LaTeX compilation failed. Debug .tex saved to {debug_path}")
+        except FileNotFoundError:
+            raise Exception("pdflatex not found. Please install LaTeX (texlive-full on Linux, MacTeX on Mac, MiKTeX on Windows)")
     
     return output_path
 
 def create_cover_letter_pdf(cover_letter_text, output_path):
-    """Generate PDF from cover letter text"""
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=letter,
-        rightMargin=inch,
-        leftMargin=inch,
-        topMargin=inch,
-        bottomMargin=inch
-    )
+    """Generate PDF from cover letter text using LaTeX"""
+    latex_content = r'''\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage[hidelinks]{hyperref}
+\usepackage[english]{babel}
+
+\usepackage[margin=1in]{geometry}
+
+\begin{document}
+
+''' + escape_latex(cover_letter_text) + r'''
+
+\end{document}'''
     
-    styles = getSampleStyleSheet()
-    body_style = ParagraphStyle(
-        'Body',
-        parent=styles['Normal'],
-        fontSize=11,
-        textColor='black',
-        spaceAfter=12,
-        alignment=TA_LEFT
-    )
-    
-    story = []
-    paragraphs = cover_letter_text.strip().split('\n\n')
-    
-    for para in paragraphs:
-        if para.strip():
-            story.append(Paragraph(para.strip(), body_style))
-            story.append(Spacer(1, 0.1*inch))
-    
-    doc.build(story)
-    
-    pdf_data = buffer.getvalue()
-    buffer.close()
-    
-    with open(output_path, 'wb') as f:
-        f.write(pdf_data)
+    # Compile LaTeX to PDF
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tex_path = os.path.join(tmpdir, 'cover_letter.tex')
+        with open(tex_path, 'w', encoding='utf-8') as f:
+            f.write(latex_content)
+        
+        try:
+            subprocess.run(
+                ['pdflatex', '-interaction=nonstopmode', '-output-directory', tmpdir, tex_path],
+                check=True,
+                capture_output=True,
+                timeout=30
+            )
+            
+            pdf_path = os.path.join(tmpdir, 'cover_letter.pdf')
+            shutil.copy(pdf_path, output_path)
+            
+        except subprocess.CalledProcessError:
+            debug_path = output_path.replace('.pdf', '.tex')
+            with open(debug_path, 'w', encoding='utf-8') as f:
+                f.write(latex_content)
+            raise Exception(f"LaTeX compilation failed. Debug .tex saved to {debug_path}")
+        except FileNotFoundError:
+            raise Exception("pdflatex not found. Please install LaTeX")
     
     return output_path
 
