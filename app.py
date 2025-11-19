@@ -251,95 +251,62 @@ Be concise and professional. Keep answers to 2-3 sentences max unless more detai
     return message.content[0].text
 
 def create_resume_pdf(adapted_resume_text, output_path):
-    """Generate ATS-friendly PDF using ReportLab matching LaTeX template style"""
+    """Generate simple text-based PDF optimized for ATS"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
-        rightMargin=0.5*inch,
-        leftMargin=0.5*inch,
-        topMargin=0.5*inch,
-        bottomMargin=0.5*inch
+        rightMargin=0.75*inch,
+        leftMargin=0.75*inch,
+        topMargin=0.75*inch,
+        bottomMargin=0.75*inch
     )
     
     styles = getSampleStyleSheet()
     
-    # Custom styles matching LaTeX template exactly
+    # Simple text styles - no fancy formatting
     name_style = ParagraphStyle(
         'Name',
-        parent=styles['Heading1'],
-        fontSize=24,
-        textColor=colors.black,
-        spaceAfter=2,
+        parent=styles['Normal'],
+        fontSize=16,
+        spaceAfter=6,
         alignment=TA_CENTER,
-        fontName='Helvetica-Bold',
-        leading=28
+        fontName='Helvetica-Bold'
     )
     
     contact_style = ParagraphStyle(
         'Contact',
         parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.black,
+        fontSize=10,
         spaceAfter=12,
         alignment=TA_CENTER,
         fontName='Helvetica'
     )
     
-    section_heading_style = ParagraphStyle(
-        'SectionHeading',
-        parent=styles['Heading2'],
-        fontSize=11,
-        textColor=colors.black,
-        spaceAfter=4,
-        spaceBefore=8,
-        alignment=TA_LEFT,
-        fontName='Helvetica-Bold',
-        textTransform='uppercase'
-    )
-    
-    # Job title style (bold, left-right justified with dates)
-    job_title_style = ParagraphStyle(
-        'JobTitle',
+    section_style = ParagraphStyle(
+        'Section',
         parent=styles['Normal'],
-        fontSize=10,
-        textColor=colors.black,
-        spaceAfter=1,
-        alignment=TA_LEFT,
+        fontSize=11,
+        spaceAfter=6,
+        spaceBefore=12,
         fontName='Helvetica-Bold'
     )
     
-    # Company/institution style (italic)
-    company_style = ParagraphStyle(
-        'Company',
+    text_style = ParagraphStyle(
+        'Text',
         parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.black,
+        fontSize=10,
         spaceAfter=4,
-        alignment=TA_LEFT,
-        fontName='Helvetica-Oblique'
+        fontName='Helvetica'
     )
     
-    bullet_style = ParagraphStyle(
-        'Bullet',
-        parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.black,
-        spaceAfter=2,
-        alignment=TA_LEFT,
-        fontName='Helvetica',
-        leftIndent=0,
-        bulletIndent=6
-    )
-    
-    # Parse resume
+    # Parse resume - just extract all text by section
     lines = adapted_resume_text.strip().split('\n')
     
     name = ""
-    contact = ""
-    sections = {'education': [], 'experience': [], 'projects': [], 'skills': []}
+    contact_lines = []
     current_section = None
-    current_item = []
+    section_content = {'education': [], 'experience': [], 'projects': [], 'skills': []}
     
     for line in lines:
         line = line.strip()
@@ -350,30 +317,15 @@ def create_resume_pdf(adapted_resume_text, output_path):
             current_section = 'contact'
             continue
         elif line.startswith('EDUCATION:'):
-            if current_item and current_section == 'contact':
-                contact = ' | '.join(current_item)
-                current_item = []
             current_section = 'education'
             continue
         elif line.startswith('EXPERIENCE:'):
-            if current_item and current_section:
-                if current_section == 'contact':
-                    contact = ' | '.join(current_item)
-                else:
-                    sections[current_section].append('\n'.join(current_item))
-                current_item = []
             current_section = 'experience'
             continue
         elif line.startswith('PROJECTS:'):
-            if current_item and current_section:
-                sections[current_section].append('\n'.join(current_item))
-                current_item = []
             current_section = 'projects'
             continue
         elif line.startswith('TECHNICAL SKILLS:'):
-            if current_item and current_section:
-                sections[current_section].append('\n'.join(current_item))
-                current_item = []
             current_section = 'skills'
             continue
         
@@ -381,157 +333,52 @@ def create_resume_pdf(adapted_resume_text, output_path):
             if not name:
                 name = line
             else:
-                current_item.append(line)
+                contact_lines.append(line)
         elif current_section:
-            current_item.append(line)
+            section_content[current_section].append(line)
     
-    # Handle last section
-    if current_item and current_section:
-        if current_section == 'contact':
-            contact = ' | '.join(current_item)
-        else:
-            sections[current_section].append('\n'.join(current_item))
-    
-    # Debug logging
-    app.logger.info(f"Parsed resume - Name: {name}")
-    app.logger.info(f"Education items: {len(sections['education'])}")
-    app.logger.info(f"Experience items: {len(sections['experience'])}")
-    app.logger.info(f"Projects items: {len(sections['projects'])}")
-    app.logger.info(f"Skills items: {len(sections['skills'])}")
-    
-    # Build document
+    # Build simple text document
     story = []
     
-    # Header - Name and Contact
+    # Name
     story.append(Paragraph(name, name_style))
-    story.append(Paragraph(contact, contact_style))
     
-    # Education Section (FIRST)
-    if sections['education']:
-        story.append(Spacer(1, 0.1*inch))
-        story.append(Paragraph('EDUCATION', section_heading_style))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=4))
-        
-        for item in sections['education']:
-            item_lines = [l.strip() for l in item.split('\n') if l.strip()]
-            if len(item_lines) >= 2:
-                # Line 1: School - Location
-                # Line 2: Degree - Dates
-                school_location = item_lines[0]
-                degree_dates = item_lines[1]
-                
-                # Create table for left-right alignment
-                parts1 = school_location.split(' - ')
-                parts2 = degree_dates.split(' - ')
-                
-                school = parts1[0] if parts1 else ""
-                location = parts1[1] if len(parts1) > 1 else ""
-                degree = parts2[0] if parts2 else ""
-                dates = ' - '.join(parts2[1:]) if len(parts2) > 1 else ""
-                
-                # School and Location row
-                data = [[Paragraph(f'<b>{school}</b>', bullet_style), Paragraph(location, bullet_style)]]
-                t = Table(data, colWidths=[5*inch, 2*inch])
-                t.setStyle(TableStyle([
-                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-                    ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ]))
-                story.append(t)
-                
-                # Degree and Dates row
-                data = [[Paragraph(f'<i>{degree}</i>', bullet_style), Paragraph(f'<i>{dates}</i>', bullet_style)]]
-                t = Table(data, colWidths=[5*inch, 2*inch])
-                t.setStyle(TableStyle([
-                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-                    ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ]))
-                story.append(t)
-                story.append(Spacer(1, 0.05*inch))
+    # Contact
+    for contact_line in contact_lines:
+        story.append(Paragraph(contact_line, contact_style))
     
-    # Experience Section (SECOND)
-    if sections['experience']:
-        story.append(Spacer(1, 0.1*inch))
-        story.append(Paragraph('EXPERIENCE', section_heading_style))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=4))
-        
-        for item in sections['experience']:
-            item_lines = [l.strip() for l in item.split('\n') if l.strip()]
-            if len(item_lines) >= 2:
-                # Line 1: Job Title - Dates
-                # Line 2: Company - Location
-                title_dates = item_lines[0]
-                company_location = item_lines[1]
-                
-                parts1 = title_dates.split(' - ')
-                title = parts1[0] if parts1 else ""
-                dates = ' - '.join(parts1[1:]) if len(parts1) > 1 else ""
-                
-                parts2 = company_location.split(' - ')
-                company = parts2[0] if parts2 else ""
-                location = parts2[1] if len(parts2) > 1 else ""
-                
-                # Title and Dates row
-                data = [[Paragraph(f'<b>{title}</b>', job_title_style), Paragraph(f'<b>{dates}</b>', job_title_style)]]
-                t = Table(data, colWidths=[5*inch, 2*inch])
-                t.setStyle(TableStyle([
-                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-                    ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ]))
-                story.append(t)
-                
-                # Company and Location row
-                data = [[Paragraph(f'<i>{company}</i>', company_style), Paragraph(f'<i>{location}</i>', company_style)]]
-                t = Table(data, colWidths=[5*inch, 2*inch])
-                t.setStyle(TableStyle([
-                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-                    ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ]))
-                story.append(t)
-                
-                # Bullet points
-                for line in item_lines[2:]:
-                    if line.startswith('•') or line.startswith('*'):
-                        bullet_text = line[1:].strip()
-                        story.append(Paragraph(f'• {bullet_text}', bullet_style))
-                
-                story.append(Spacer(1, 0.08*inch))
+    story.append(Spacer(1, 0.15*inch))
     
-    # Projects Section (THIRD)
-    if sections['projects']:
+    # Education
+    if section_content['education']:
+        story.append(Paragraph('EDUCATION', section_style))
+        story.append(Spacer(1, 0.05*inch))
+        for line in section_content['education']:
+            story.append(Paragraph(line, text_style))
         story.append(Spacer(1, 0.1*inch))
-        story.append(Paragraph('PROJECTS', section_heading_style))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=4))
-        
-        for item in sections['projects']:
-            item_lines = [l.strip() for l in item.split('\n') if l.strip()]
-            if item_lines:
-                # First line is project title/tech
-                story.append(Paragraph(f'<b>{item_lines[0]}</b>', job_title_style))
-                
-                # Bullet points
-                for line in item_lines[1:]:
-                    if line.startswith('•') or line.startswith('*'):
-                        bullet_text = line[1:].strip()
-                        story.append(Paragraph(f'• {bullet_text}', bullet_style))
-                
-                story.append(Spacer(1, 0.08*inch))
     
-    # Skills Section (FOURTH/LAST)
-    if sections['skills']:
+    # Experience
+    if section_content['experience']:
+        story.append(Paragraph('EXPERIENCE', section_style))
+        story.append(Spacer(1, 0.05*inch))
+        for line in section_content['experience']:
+            story.append(Paragraph(line, text_style))
         story.append(Spacer(1, 0.1*inch))
-        story.append(Paragraph('TECHNICAL SKILLS', section_heading_style))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=4))
-        
-        # Skills are stored as a single string with newlines, split them
-        skills_content = sections['skills'][0] if sections['skills'] else ""
-        for line in skills_content.split('\n'):
-            line = line.strip()
-            if line:
-                story.append(Paragraph(line, bullet_style))
+    
+    # Projects
+    if section_content['projects']:
+        story.append(Paragraph('PROJECTS', section_style))
+        story.append(Spacer(1, 0.05*inch))
+        for line in section_content['projects']:
+            story.append(Paragraph(line, text_style))
+        story.append(Spacer(1, 0.1*inch))
+    
+    # Skills
+    if section_content['skills']:
+        story.append(Paragraph('TECHNICAL SKILLS', section_style))
+        story.append(Spacer(1, 0.05*inch))
+        for line in section_content['skills']:
+            story.append(Paragraph(line, text_style))
     
     # Build PDF
     doc.build(story)
