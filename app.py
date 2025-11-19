@@ -115,13 +115,38 @@ def generate_cover_letter(resume_text, job_description):
     """Use Claude to generate a human-sounding cover letter"""
     client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
     
+    # Check for graduation date vs expected start date
+    graduation_note = ""
+    import re
+    from datetime import datetime
+    
+    # Look for graduation date in resume
+    grad_match = re.search(r'Expected (May|June|July|August|December) (\d{4})', resume_text)
+    if grad_match:
+        month_str = grad_match.group(1)
+        year = int(grad_match.group(2))
+        
+        # Convert month to number
+        month_map = {'May': 5, 'June': 6, 'July': 7, 'August': 8, 'December': 12}
+        grad_month = month_map.get(month_str, 5)
+        
+        try:
+            grad_date = datetime(year, grad_month, 1)
+            current_date = datetime.now()
+            
+            # If graduation is in the future
+            if grad_date > current_date:
+                graduation_note = f"\n\nIMPORTANT: The candidate's expected graduation date is {month_str} {year}. If the job posting has an immediate start date or starts before graduation, YOU MUST acknowledge this timing in the cover letter. Add a brief, professional statement that they are graduating in {month_str} {year} and are eager to discuss how the timeline could work, or if there's flexibility for a start date after graduation. Keep it positive and solution-oriented - don't make it sound like a dealbreaker."
+        except:
+            pass
+    
     prompt = f"""You are writing a cover letter for a job application.
 
 Here is the candidate's resume:
 {resume_text}
 
 Here is the job description:
-{job_description}
+{job_description}{graduation_note}
 
 Write a cover letter that:
 1. Sounds human and authentic, not generic or robotic
@@ -130,6 +155,7 @@ Write a cover letter that:
 4. Shows genuine interest in the role
 5. Doesn't use clichés like "I am writing to express my interest"
 6. Gets straight to the point
+7. If there's a graduation timing issue, address it tactfully in the closing paragraph
 
 Format it as a proper cover letter with:
 - Date (use [DATE])
@@ -154,13 +180,35 @@ def generate_form_text(resume_text, job_description):
     """Extract form questions from job posting and provide answers based on resume"""
     client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
     
+    # Check for graduation date
+    graduation_note = ""
+    import re
+    from datetime import datetime
+    
+    grad_match = re.search(r'Expected (May|June|July|August|December) (\d{4})', resume_text)
+    if grad_match:
+        month_str = grad_match.group(1)
+        year = int(grad_match.group(2))
+        
+        month_map = {'May': 5, 'June': 6, 'July': 7, 'August': 8, 'December': 12}
+        grad_month = month_map.get(month_str, 5)
+        
+        try:
+            grad_date = datetime(year, grad_month, 1)
+            current_date = datetime.now()
+            
+            if grad_date > current_date:
+                graduation_note = f"\n\nNOTE: Candidate graduates {month_str} {year}. If asked about start date availability, mention graduating {month_str} {year} and available to start shortly after, or indicate willingness to discuss flexible arrangements if needed sooner."
+        except:
+            pass
+    
     prompt = f"""You are helping fill out job application forms that ask specific questions.
 
 Here is the candidate's resume:
 {resume_text}
 
 Here is the job posting (may contain application questions):
-{job_description}
+{job_description}{graduation_note}
 
 Your task:
 1. Extract any application questions from the job posting (like "Why do you want to work here?", "How many years of X experience?", "Are you authorized to work in...", etc.)
@@ -181,10 +229,11 @@ ANSWER: [Your response]
 
 Years of relevant experience: [X years]
 Highest education level: [Degree]
+Expected graduation date: [If applicable - {month_str} {year} or N/A]
 Willing to relocate: [Yes/No based on resume]
 Authorized to work in US: [Yes - confirm with candidate]
 Expected salary: [Research market rate for this role]
-Available start date: [2 weeks notice / Immediate]
+Available start date: [If graduating soon, mention graduation date + availability]
 
 Key technical skills (comma-separated): [relevant skills from resume]
 
@@ -307,19 +356,22 @@ def create_resume_pdf(adapted_resume_text, output_path):
             current_section = 'education'
             continue
         elif line.startswith('EXPERIENCE:'):
-            if current_item:
-                sections[current_section].append('\n'.join(current_item))
+            if current_item and current_section:
+                if current_section == 'contact':
+                    contact = ' | '.join(current_item)
+                else:
+                    sections[current_section].append('\n'.join(current_item))
                 current_item = []
             current_section = 'experience'
             continue
         elif line.startswith('PROJECTS:'):
-            if current_item:
+            if current_item and current_section:
                 sections[current_section].append('\n'.join(current_item))
                 current_item = []
             current_section = 'projects'
             continue
         elif line.startswith('TECHNICAL SKILLS:'):
-            if current_item:
+            if current_item and current_section:
                 sections[current_section].append('\n'.join(current_item))
                 current_item = []
             current_section = 'skills'
@@ -330,12 +382,22 @@ def create_resume_pdf(adapted_resume_text, output_path):
                 name = line
             else:
                 current_item.append(line)
-        else:
+        elif current_section:
             current_item.append(line)
     
     # Handle last section
     if current_item and current_section:
-        sections[current_section].append('\n'.join(current_item))
+        if current_section == 'contact':
+            contact = ' | '.join(current_item)
+        else:
+            sections[current_section].append('\n'.join(current_item))
+    
+    # Debug logging
+    app.logger.info(f"Parsed resume - Name: {name}")
+    app.logger.info(f"Education items: {len(sections['education'])}")
+    app.logger.info(f"Experience items: {len(sections['experience'])}")
+    app.logger.info(f"Projects items: {len(sections['projects'])}")
+    app.logger.info(f"Skills items: {len(sections['skills'])}")
     
     # Build document
     story = []
@@ -464,11 +526,12 @@ def create_resume_pdf(adapted_resume_text, output_path):
         story.append(Paragraph('TECHNICAL SKILLS', section_heading_style))
         story.append(HRFlowable(width="100%", thickness=1, color=colors.black, spaceAfter=4))
         
-        for item in sections['skills']:
-            for line in item.split('\n'):
-                line = line.strip()
-                if line:
-                    story.append(Paragraph(line, bullet_style))
+        # Skills are stored as a single string with newlines, split them
+        skills_content = sections['skills'][0] if sections['skills'] else ""
+        for line in skills_content.split('\n'):
+            line = line.strip()
+            if line:
+                story.append(Paragraph(line, bullet_style))
     
     # Build PDF
     doc.build(story)
