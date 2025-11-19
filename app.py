@@ -360,14 +360,14 @@ def create_resume_pdf(adapted_resume_text, output_path):
 '''
         for item in education_items:
             # Parse education item
-            item_lines = item.split('\n')
+            item_lines = [l.strip() for l in item.split('\n') if l.strip()]
             if len(item_lines) >= 2:
                 school_loc = item_lines[0].split(' - ')
-                school = school_loc[0] if school_loc else item_lines[0]
-                location = school_loc[1] if len(school_loc) > 1 else ""
+                school = school_loc[0].strip() if school_loc else item_lines[0]
+                location = school_loc[1].strip() if len(school_loc) > 1 else ""
                 degree_dates = item_lines[1].split(' - ')
-                degree = degree_dates[0] if degree_dates else item_lines[1]
-                dates = degree_dates[1] if len(degree_dates) > 1 else ""
+                degree = degree_dates[0].strip() if degree_dates else item_lines[1]
+                dates = ' - '.join([d.strip() for d in degree_dates[1:]]) if len(degree_dates) > 1 else ""
                 
                 latex_content += f'''    \\resumeSubheading
       {{{escape_latex(school)}}}{{{escape_latex(location)}}}
@@ -383,17 +383,17 @@ def create_resume_pdf(adapted_resume_text, output_path):
   \resumeSubHeadingListStart
 '''
         for item in experience_items:
-            item_lines = [l for l in item.split('\n') if l.strip()]
+            item_lines = [l.strip() for l in item.split('\n') if l.strip()]
             if len(item_lines) >= 2:
                 # First line: job title - dates
                 title_dates = item_lines[0].split(' - ')
-                title = title_dates[0] if title_dates else item_lines[0]
-                dates = ' - '.join(title_dates[1:]) if len(title_dates) > 1 else ""
+                title = title_dates[0].strip() if title_dates else item_lines[0]
+                dates = ' - '.join([d.strip() for d in title_dates[1:]]) if len(title_dates) > 1 else ""
                 
                 # Second line: company - location
                 company_loc = item_lines[1].split(' - ')
-                company = company_loc[0] if company_loc else item_lines[1]
-                location = company_loc[1] if len(company_loc) > 1 else ""
+                company = company_loc[0].strip() if company_loc else item_lines[1]
+                location = company_loc[1].strip() if len(company_loc) > 1 else ""
                 
                 latex_content += f'''    \\resumeSubheading
       {{{escape_latex(title)}}}{{{escape_latex(dates)}}}
@@ -402,8 +402,8 @@ def create_resume_pdf(adapted_resume_text, output_path):
 '''
                 # Add bullet points
                 for line in item_lines[2:]:
-                    if line.strip().startswith('•'):
-                        bullet_text = line.strip()[1:].strip()
+                    if line.startswith('•') or line.startswith('*'):
+                        bullet_text = line[1:].strip()
                         latex_content += f'''        \\resumeItem{{{escape_latex(bullet_text)}}}
 '''
                 latex_content += r'''      \resumeItemListEnd
@@ -418,7 +418,7 @@ def create_resume_pdf(adapted_resume_text, output_path):
     \resumeSubHeadingListStart
 '''
         for item in projects_items:
-            item_lines = [l for l in item.split('\n') if l.strip()]
+            item_lines = [l.strip() for l in item.split('\n') if l.strip()]
             if item_lines:
                 # First line: project name | tech - dates
                 first_line = item_lines[0]
@@ -427,8 +427,8 @@ def create_resume_pdf(adapted_resume_text, output_path):
           \\resumeItemListStart
 '''
                 for line in item_lines[1:]:
-                    if line.strip().startswith('•'):
-                        bullet_text = line.strip()[1:].strip()
+                    if line.startswith('•') or line.startswith('*'):
+                        bullet_text = line[1:].strip()
                         latex_content += f'''            \\resumeItem{{{escape_latex(bullet_text)}}}
 '''
                 latex_content += r'''          \resumeItemListEnd
@@ -444,7 +444,8 @@ def create_resume_pdf(adapted_resume_text, output_path):
     \small{\item{
 '''
         for line in skills_text.split('\n'):
-            if line.strip():
+            line = line.strip()
+            if line:
                 latex_content += f'''     {escape_latex(line)} \\\\
 '''
         latex_content += r'''    }}
@@ -452,6 +453,11 @@ def create_resume_pdf(adapted_resume_text, output_path):
 '''
     
     latex_content += r'''\end{document}'''
+    
+    # Always save the .tex file for debugging
+    debug_tex = output_path.replace('.pdf', '.tex')
+    with open(debug_tex, 'w', encoding='utf-8') as f:
+        f.write(latex_content)
     
     # Compile LaTeX to PDF
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -468,21 +474,32 @@ def create_resume_pdf(adapted_resume_text, output_path):
                 text=True
             )
             
+            # Always save the log file
+            log_path = os.path.join(tmpdir, 'resume.log')
+            if os.path.exists(log_path):
+                debug_log = output_path.replace('.pdf', '.log')
+                shutil.copy(log_path, debug_log)
+                app.logger.info(f"LaTeX log saved to {debug_log}")
+            
             # Check if PDF was created
             pdf_path = os.path.join(tmpdir, 'resume.pdf')
             if not os.path.exists(pdf_path):
-                # Save debug files
-                debug_tex = output_path.replace('.pdf', '.tex')
-                debug_log = output_path.replace('.pdf', '.log')
-                with open(debug_tex, 'w', encoding='utf-8') as f:
-                    f.write(latex_content)
-                log_path = os.path.join(tmpdir, 'resume.log')
+                # Extract error from log
+                error_msg = "Unknown LaTeX error"
                 if os.path.exists(log_path):
-                    shutil.copy(log_path, debug_log)
-                raise Exception(f"LaTeX failed to generate PDF. Check {debug_tex} and {debug_log}. Output: {result.stderr[:500]}")
+                    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        log_content = f.read()
+                        # Find the first error line
+                        for line in log_content.split('\n'):
+                            if '!' in line and 'Error' in line:
+                                error_msg = line
+                                break
+                
+                raise Exception(f"LaTeX compilation failed: {error_msg}. Check {debug_tex} and {output_path.replace('.pdf', '.log')}")
             
             # Copy PDF to output path
             shutil.copy(pdf_path, output_path)
+            app.logger.info(f"Successfully created PDF: {output_path}")
             
         except subprocess.TimeoutExpired:
             raise Exception("LaTeX compilation timed out after 60 seconds")
