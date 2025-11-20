@@ -339,17 +339,27 @@ def create_resume_pdf(adapted_resume_text, output_path):
         elif current_section:
             section_content[current_section].append(line)
     
+    # Debug log to check if name and contact are captured
+    app.logger.info(f"Parsed name: {name}")
+    app.logger.info(f"Contact lines: {contact_lines}")
+    app.logger.info(f"Education items: {len(section_content['education'])}")
+    app.logger.info(f"Experience items: {len(section_content['experience'])}")
+    
     # Build simple text document - compact spacing for one page
     story = []
     
-    # Name
-    story.append(Paragraph(name, name_style))
+    # Name - make sure it exists
+    if name:
+        story.append(Paragraph(name, name_style))
     
-    # Contact
-    for contact_line in contact_lines:
-        story.append(Paragraph(contact_line, contact_style))
-    
-    story.append(Spacer(1, 0.12*inch))
+    # Contact - make sure they exist
+    if contact_lines:
+        for contact_line in contact_lines:
+            story.append(Paragraph(contact_line, contact_style))
+        story.append(Spacer(1, 0.12*inch))
+    else:
+        # Fallback spacing if no contact
+        story.append(Spacer(1, 0.12*inch))
     
     # Education
     if section_content['education']:
