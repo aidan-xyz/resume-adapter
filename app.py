@@ -69,9 +69,10 @@ Please reformat this resume to be optimized for this job. Follow these rules:
 2. Emphasize experience and skills relevant to the job description
 3. Use keywords from the job description where appropriate
 4. Keep bullet points concise and impact-focused
-5. Ensure it fits on ONE page worth of content
+5. CRITICAL: Must fit on ONE page - limit to 3-4 bullets per job, 2-3 bullets per project. Be concise.
 6. Make it ATS-friendly (simple formatting, no tables, clear sections)
 7. Keep the person's actual experience - don't fabricate anything
+8. NEVER use em dashes (—) - use regular hyphens (-) instead
 
 Return ONLY the adapted resume content in this exact format:
 
@@ -156,12 +157,12 @@ Write a cover letter that:
 5. Doesn't use clichés like "I am writing to express my interest"
 6. Gets straight to the point
 7. If there's a graduation timing issue, address it tactfully in the closing paragraph
+8. NEVER use em dashes (—) - use regular hyphens (-) instead
 
 Format it as a proper cover letter with:
-- Date (use [DATE])
-- Hiring Manager section (use [HIRING MANAGER NAME] and [COMPANY NAME])
+- Start with "Dear Hiring Manager," (no date, no placeholder names)
 - Body paragraphs
-- Professional closing
+- Professional closing with candidate's name
 
 Return ONLY the cover letter text, no explanations."""
 
@@ -251,25 +252,25 @@ Be concise and professional. Keep answers to 2-3 sentences max unless more detai
     return message.content[0].text
 
 def create_resume_pdf(adapted_resume_text, output_path):
-    """Generate simple text-based PDF optimized for ATS"""
+    """Generate simple text-based PDF optimized for ATS - ONE PAGE ONLY"""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
-        rightMargin=0.75*inch,
-        leftMargin=0.75*inch,
-        topMargin=0.75*inch,
-        bottomMargin=0.75*inch
+        rightMargin=0.5*inch,
+        leftMargin=0.5*inch,
+        topMargin=0.5*inch,
+        bottomMargin=0.5*inch
     )
     
     styles = getSampleStyleSheet()
     
-    # Simple text styles - no fancy formatting
+    # Compact text styles to fit one page
     name_style = ParagraphStyle(
         'Name',
         parent=styles['Normal'],
-        fontSize=16,
-        spaceAfter=6,
+        fontSize=14,
+        spaceAfter=4,
         alignment=TA_CENTER,
         fontName='Helvetica-Bold'
     )
@@ -277,8 +278,8 @@ def create_resume_pdf(adapted_resume_text, output_path):
     contact_style = ParagraphStyle(
         'Contact',
         parent=styles['Normal'],
-        fontSize=10,
-        spaceAfter=12,
+        fontSize=9,
+        spaceAfter=8,
         alignment=TA_CENTER,
         fontName='Helvetica'
     )
@@ -286,18 +287,19 @@ def create_resume_pdf(adapted_resume_text, output_path):
     section_style = ParagraphStyle(
         'Section',
         parent=styles['Normal'],
-        fontSize=11,
-        spaceAfter=6,
-        spaceBefore=12,
+        fontSize=10,
+        spaceAfter=3,
+        spaceBefore=8,
         fontName='Helvetica-Bold'
     )
     
     text_style = ParagraphStyle(
         'Text',
         parent=styles['Normal'],
-        fontSize=10,
-        spaceAfter=4,
-        fontName='Helvetica'
+        fontSize=9,
+        spaceAfter=2,
+        fontName='Helvetica',
+        leading=11
     )
     
     # Parse resume - just extract all text by section
@@ -337,7 +339,7 @@ def create_resume_pdf(adapted_resume_text, output_path):
         elif current_section:
             section_content[current_section].append(line)
     
-    # Build simple text document
+    # Build simple text document - compact spacing for one page
     story = []
     
     # Name
@@ -347,36 +349,29 @@ def create_resume_pdf(adapted_resume_text, output_path):
     for contact_line in contact_lines:
         story.append(Paragraph(contact_line, contact_style))
     
-    story.append(Spacer(1, 0.15*inch))
+    story.append(Spacer(1, 0.08*inch))
     
     # Education
     if section_content['education']:
         story.append(Paragraph('EDUCATION', section_style))
-        story.append(Spacer(1, 0.05*inch))
         for line in section_content['education']:
             story.append(Paragraph(line, text_style))
-        story.append(Spacer(1, 0.1*inch))
     
     # Experience
     if section_content['experience']:
         story.append(Paragraph('EXPERIENCE', section_style))
-        story.append(Spacer(1, 0.05*inch))
         for line in section_content['experience']:
             story.append(Paragraph(line, text_style))
-        story.append(Spacer(1, 0.1*inch))
     
     # Projects
     if section_content['projects']:
         story.append(Paragraph('PROJECTS', section_style))
-        story.append(Spacer(1, 0.05*inch))
         for line in section_content['projects']:
             story.append(Paragraph(line, text_style))
-        story.append(Spacer(1, 0.1*inch))
     
     # Skills
     if section_content['skills']:
         story.append(Paragraph('TECHNICAL SKILLS', section_style))
-        story.append(Spacer(1, 0.05*inch))
         for line in section_content['skills']:
             story.append(Paragraph(line, text_style))
     
