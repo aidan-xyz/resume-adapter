@@ -269,8 +269,8 @@ def create_resume_pdf(adapted_resume_text, output_path):
     name_style = ParagraphStyle(
         'Name',
         parent=styles['Normal'],
-        fontSize=14,
-        spaceAfter=4,
+        fontSize=16,
+        spaceAfter=6,
         alignment=TA_CENTER,
         fontName='Helvetica-Bold'
     )
@@ -278,8 +278,8 @@ def create_resume_pdf(adapted_resume_text, output_path):
     contact_style = ParagraphStyle(
         'Contact',
         parent=styles['Normal'],
-        fontSize=9,
-        spaceAfter=8,
+        fontSize=10,
+        spaceAfter=10,
         alignment=TA_CENTER,
         fontName='Helvetica'
     )
@@ -287,19 +287,19 @@ def create_resume_pdf(adapted_resume_text, output_path):
     section_style = ParagraphStyle(
         'Section',
         parent=styles['Normal'],
-        fontSize=10,
-        spaceAfter=3,
-        spaceBefore=8,
+        fontSize=11,
+        spaceAfter=6,
+        spaceBefore=10,
         fontName='Helvetica-Bold'
     )
     
     text_style = ParagraphStyle(
         'Text',
         parent=styles['Normal'],
-        fontSize=9,
-        spaceAfter=2,
+        fontSize=10,
+        spaceAfter=4,
         fontName='Helvetica',
-        leading=11
+        leading=13
     )
     
     # Parse resume - just extract all text by section
@@ -349,25 +349,28 @@ def create_resume_pdf(adapted_resume_text, output_path):
     for contact_line in contact_lines:
         story.append(Paragraph(contact_line, contact_style))
     
-    story.append(Spacer(1, 0.08*inch))
+    story.append(Spacer(1, 0.12*inch))
     
     # Education
     if section_content['education']:
         story.append(Paragraph('EDUCATION', section_style))
         for line in section_content['education']:
             story.append(Paragraph(line, text_style))
+        story.append(Spacer(1, 0.05*inch))
     
     # Experience
     if section_content['experience']:
         story.append(Paragraph('EXPERIENCE', section_style))
         for line in section_content['experience']:
             story.append(Paragraph(line, text_style))
+        story.append(Spacer(1, 0.05*inch))
     
     # Projects
     if section_content['projects']:
         story.append(Paragraph('PROJECTS', section_style))
         for line in section_content['projects']:
             story.append(Paragraph(line, text_style))
+        story.append(Spacer(1, 0.05*inch))
     
     # Skills
     if section_content['skills']:
