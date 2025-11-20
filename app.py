@@ -13,6 +13,8 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from reportlab.lib import colors
 import io
 import secrets
+import string
+import re
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -509,9 +511,26 @@ def process_resume():
             combined_questions = f"{job_description}\n\nADDITIONAL APPLICATION QUESTIONS:\n{form_questions}"
         form_text = generate_form_text(resume_text, combined_questions)
         
+        # Extract name from adapted resume for filename
+        name_for_file = "Resume"
+        lines = adapted_resume.strip().split('\n')
+        for i, line in enumerate(lines):
+            if 'CONTACT INFO:' in line and i + 1 < len(lines):
+                name_for_file = lines[i + 1].strip().replace(' ', '_')
+                # Clean filename
+                name_for_file = re.sub(r'[^\w\s-]', '', name_for_file).replace(' ', '_')
+                break
+        
+        # Generate unique random suffix (8 characters)
+        random_suffix = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(8))
+        
+        # Create unique filenames
+        resume_filename = f"{name_for_file}_Resume_{random_suffix}.pdf"
+        cover_letter_filename = f"{name_for_file}_CoverLetter_{random_suffix}.pdf"
+        
         # Create output PDFs
-        resume_output_path = os.path.join(app.config['OUTPUT_FOLDER'], f"adapted_{filename}")
-        cover_letter_output_path = os.path.join(app.config['OUTPUT_FOLDER'], f"cover_letter_{filename}")
+        resume_output_path = os.path.join(app.config['OUTPUT_FOLDER'], resume_filename)
+        cover_letter_output_path = os.path.join(app.config['OUTPUT_FOLDER'], cover_letter_filename)
         
         create_resume_pdf(adapted_resume, resume_output_path)
         create_cover_letter_pdf(cover_letter, cover_letter_output_path)
@@ -520,8 +539,8 @@ def process_resume():
             'adapted_resume': adapted_resume,
             'cover_letter': cover_letter,
             'form_text': form_text,
-            'resume_pdf_url': f'/download/resume/{filename}',
-            'cover_letter_pdf_url': f'/download/cover_letter/{filename}',
+            'resume_pdf_url': f'/download/resume/{resume_filename}',
+            'cover_letter_pdf_url': f'/download/cover_letter/{cover_letter_filename}',
             'has_resume_cached': True
         })
     
@@ -534,14 +553,14 @@ def process_resume():
 @app.route('/download/resume/<filename>')
 @auth.login_required
 def download_resume(filename):
-    file_path = os.path.join(app.config['OUTPUT_FOLDER'], f"adapted_{filename}")
-    return send_file(file_path, as_attachment=True, download_name=f"adapted_{filename}")
+    file_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
+    return send_file(file_path, as_attachment=True, download_name=filename)
 
 @app.route('/download/cover_letter/<filename>')
 @auth.login_required
 def download_cover_letter(filename):
-    file_path = os.path.join(app.config['OUTPUT_FOLDER'], f"cover_letter_{filename}")
-    return send_file(file_path, as_attachment=True, download_name=f"cover_letter_{filename}")
+    file_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
+    return send_file(file_path, as_attachment=True, download_name=filename)
 
 @app.route('/clear_resume', methods=['POST'])
 @auth.login_required
